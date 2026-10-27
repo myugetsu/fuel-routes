@@ -1,0 +1,99 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fuel route planner</title>
+<style>
+body{font:17px system-ui;background:#f3f6f4;color:#18332d;max-width:650px;margin:60px auto;padding:24px}
+fieldset{border:1px solid #a8bdb4;border-radius:8px;margin:24px 0;padding:16px}legend{font-weight:600;padding:0 8px}
+.choices{display:grid;grid-template-columns:110px 1fr;gap:16px}label{display:block}select,button{font:inherit;padding:12px;box-sizing:border-box;width:100%;border:1px solid #a8bdb4;border-radius:6px}select{margin-top:8px;background:white;color:#18332d}button{background:#185b47;color:white;cursor:pointer}button:disabled{opacity:.55;cursor:not-allowed}select:disabled{background:#e8eeeb}#error,.location-status{color:#a02724}small{display:block;margin-top:12px}.location-status:empty{display:none}@media(max-width:420px){.choices{grid-template-columns:1fr}body{margin:20px auto}}
+</style>
+</head><body>
+<h1>Plan your fuel stops</h1><p>Find cost-effective stations on a US driving route. Vehicle: 10 mpg, 500-mile range.</p>
+<p>Choose locations connected by road. Trips between disconnected islands and the mainland cannot be planned.</p>
+<p id="location-help">Choose a state, then a city for each location. You can type a city name while its dropdown is focused to jump to it.</p>
+<form id="planner">
+<fieldset aria-describedby="location-help"><legend>Start location</legend><div class="choices">
+<label for="start-state">State<select id="start-state" required>
+<option value="" selected disabled>Select state</option>
+{% for state in states %}<option value="{{ state }}">{{ state }}</option>{% endfor %}
+</select></label>
+<label for="start">City<select id="start" name="start" required disabled>
+<option value="" selected disabled>Select a state first</option>
+</select></label></div><p id="start-status" class="location-status" role="status"></p></fieldset>
+<fieldset aria-describedby="location-help"><legend>Finish location</legend><div class="choices">
+<label for="finish-state">State<select id="finish-state" required>
+<option value="" selected disabled>Select state</option>
+{% for state in states %}<option value="{{ state }}">{{ state }}</option>{% endfor %}
+</select></label>
+<label for="finish">City<select id="finish" name="finish" required disabled>
+<option value="" selected disabled>Select a state first</option>
+</select></label></div><p id="finish-status" class="location-status" role="status"></p></fieldset>
+<button type="submit" disabled>Plan route</button></form>
+<small>Starts with a full tank. Total cost includes the consumed initial fuel, valued at the nearest located station’s CSV price. Cities resolve to approximate city centers.</small>
+<p id="error" role="status"></p>
+<script>
+const form = document.getElementById('planner');
+const button = form.querySelector('button');
+const cityCache = new Map();
+let planning = false;
+function updateButton() {
+  button.disabled = planning || !document.getElementById('start').value || !document.getElementById('finish').value;
+}
+async function citiesFor(state) {
+  if (!cityCache.has(state)) {
+    const request = fetch(`/api/places/?state=${encodeURIComponent(state)}`).then(async response => {
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message || 'Unable to load cities.');
+      return body.cities;
+    }).catch(error => {cityCache.delete(state); throw error;});
+    cityCache.set(state, request);
+  }
+  return cityCache.get(state);
+}
+for (const endpoint of ['start', 'finish']) {
+  const stateSelect = document.getElementById(`${endpoint}-state`);
+  const citySelect = document.getElementById(endpoint);
+  const status = document.getElementById(`${endpoint}-status`);
+  let requestVersion = 0;
+  stateSelect.addEventListener('change', async () => {
+    const version = ++requestVersion;
+    const state = stateSelect.value;
+    citySelect.replaceChildren(new Option('Loading cities…', '', true, true));
+    citySelect.disabled = true;
+    status.textContent = '';
+    updateButton();
+    try {
+      const cities = await citiesFor(state);
+      // An older response must not replace a newer state selection.
+      if (version !== requestVersion) return;
+      const placeholder = new Option(cities.length ? 'Select city' : 'No cities available', '', true, true);
+      placeholder.disabled = true;
+      const choices = document.createDocumentFragment();
+      choices.append(placeholder);
+      cities.forEach(city => choices.append(new Option(city.label, city.value)));
+      citySelect.replaceChildren(choices);
+      citySelect.disabled = !cities.length;
+      if (!cities.length) status.textContent = 'No cities are available for this state.';
+    } catch(error) {
+      if (version !== requestVersion) return;
+      citySelect.replaceChildren(new Option('Unable to load cities', '', true, true));
+      status.textContent = `${error.message} Choose a state again to retry.`;
+    } finally {
+      updateButton();
+    }
+  });
+  citySelect.addEventListener('change', updateButton);
+}
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (planning || !form.reportValidity()) return;
+  planning = true; updateButton(); button.textContent = 'Planning…';
+  const status = document.getElementById('error'); status.textContent = '';
+  try {
+    const response = await fetch('/api/routes/', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form)))});
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error?.message || 'Unable to plan route.');
+    window.location.assign(body.map_url);
+  } catch(error) { status.textContent = error.message; }
+  finally {planning = false; updateButton(); button.textContent = 'Plan route';}
+});
+</script></body></html>

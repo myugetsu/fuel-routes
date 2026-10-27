@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Your fuel route</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>body{margin:0;font:16px system-ui;color:#18332d}header{padding:16px 24px}#map{height:76vh}a{color:#185b47}p{margin:8px 0}footer{padding:12px 24px}</style>
+</head>
+<body>
+<header><a href="/">Plan another route</a><h1>Your fuel route</h1>
+<p>{{ plan.route.distance_miles }} miles · {{ plan.fuel.gallons_consumed }} gallons · ${{ plan.fuel.total_cost_usd }} total fuel cost</p>
+<p>${{ plan.fuel.money_spent_en_route_usd }} purchased en route; ${{ plan.fuel.initial_fuel_consumed_cost_usd }} consumed from the initial tank.</p></header>
+<div id="map" aria-label="Driving route and fuel stops"></div>
+<footer>{{ plan.attribution }} · <a href="https://www.openstreetmap.org/fixthemap">Fix the map</a>
+<details><summary>Planning assumptions</summary><ul>{% for assumption in plan.assumptions %}<li>{{ assumption }}</li>{% endfor %}</ul></details></footer>
+{{ plan|json_script:"route-data" }}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const plan = JSON.parse(document.getElementById('route-data').textContent);
+const map = L.map('map');
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
+const line = L.geoJSON(plan.route.geometry, {style:{color:'#176c54',weight:5}}).addTo(map);
+map.fitBounds(line.getBounds(), {padding:[24,24]});
+const coords = plan.route.geometry.coordinates;
+L.marker([coords[0][1],coords[0][0]]).addTo(map).bindPopup('Start');
+const last = coords[coords.length-1];
+L.marker([last[1],last[0]]).addTo(map).bindPopup('Finish');
+plan.fuel_stops.forEach((stop,index) => {
+  const text = document.createElement('div');
+  text.textContent = `${index+1}. ${stop.name} — ${stop.address}, ${stop.city}, ${stop.state}. Buy ${stop.gallons} gal at $${stop.price_per_gallon}/gal: $${stop.cost_usd}. Mile ${stop.mile}.`;
+  L.marker([stop.latitude,stop.longitude]).addTo(map).bindPopup(text);
+});
+</script>
+</body></html>
